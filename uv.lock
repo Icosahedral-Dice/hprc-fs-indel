@@ -3,7 +3,7 @@ revision = 5
 requires-python = ">=3.12"
 
 [[package]]
-name = "hprc-fs-ins"
+name = "hprc-fs-indel"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

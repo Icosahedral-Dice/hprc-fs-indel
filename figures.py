@@ -9,6 +9,8 @@ import re
 from collections import Counter
 from pathlib import Path
 
+from report import NET_CLASSES, net_class
+
 RESULTS, OUT = Path("results"), Path("figures")
 W = 760
 # SPRY2 worked example: CAT CDS blocks on HG02583 hap2 JBHIIV010000008.1 (minus strand), from the CAT GFF3
@@ -123,7 +125,7 @@ def fig_flags(rows):
                                     ("s1", sum(r["repaired_orf"] != "intact" for r in fc))]),
     ]
     x0, span = 200, 520
-    b = [text(24, 30, f"CAT's flags pass {100 * missed / n:.0f}% of transcripts with a dropped frame-changing insertion", "t"),
+    b = [text(24, 30, f"CAT's flags pass {100 * missed / n:.0f}% of transcripts with a frame-changing CDS gap", "t"),
          text(24, 50, f"{n:,} CAT transcripts with a frame-changing 1–29 bp CDS gap, all "
                       f"{len({r['assembly'] for r in rows})} HPRC R2 haplotypes", "sub")]
     b += legend(x0, 80, [("s2", "looks fine"), ("s1", "flags a problem"), ("na", "no value (N/A)")])
@@ -159,7 +161,7 @@ def fig_per_haplotype(rows):
     top = max(bins.values())
     ymax = ((top // 20) + 1) * 20
     x0, y0, pw, ph = 70, 250, 640, 170
-    b = [text(24, 30, f"Every haplotype is affected: {vals[len(vals) // 2]} dropped frame-changing insertions per "
+    b = [text(24, 30, f"Every haplotype is affected: {vals[len(vals) // 2]} frame-changing CDS gaps per "
                       f"haplotype (median)", "t"),
          text(24, 50, f"Distinct frame-changing CDS gap loci per haplotype, {len(vals)} HPRC R2 haplotypes "
                       f"(range {vals[0]}–{vals[-1]})", "sub")]
@@ -178,7 +180,7 @@ def fig_per_haplotype(rows):
     b += [f'<line x1="{x0}" y1="{y0}" x2="{x0 + pw}" y2="{y0}" class="axis"/>',
           text(x0 + pw / 2, y0 + 40, "frame-changing CDS gaps per haplotype", "sub", "middle"),
           text(16, y0 - ph / 2, "haplotypes", "sub", "middle").replace("<text", f'<text transform="rotate(-90 16 {y0 - ph / 2})"')]
-    svg("per_haplotype.svg", y0 + 56, b, "Dropped insertions per haplotype",
+    svg("per_haplotype.svg", y0 + 56, b, "Frame-changing CDS gaps per haplotype",
         f"Histogram of frame-changing CDS gaps per haplotype; median {vals[len(vals) // 2]}, range {vals[0]}-{vals[-1]}.")
 
 
@@ -225,7 +227,8 @@ def fig_hifi():
              ("absent", "s2", "insertion in ≤5% of reads")]
     x0, span = 200, 520
     b = [text(24, 30, "HiFi reads confirm the dropped bases", "t"),
-         text(24, 50, "Random frame-changing events, one per gene: HPRC R2 HiFi reads at the GRCh38 position", "sub")]
+         text(24, 50, "Random frameshift-insertion events, one per gene: HPRC R2 HiFi reads at the GRCh38 position",
+              "sub")]
     b += legend(x0, 80, [(c, lab) for _, c, lab in order])
     y = 116
     for role, label in (("carrier", "haplotype with the gap"), ("control", "sample without it")):
@@ -243,8 +246,39 @@ def fig_hifi():
             x += w
         y += 44
     b.append(text(24, y, "Reads: HPRC R2 HiFi-to-GRCh38 alignments (the assemblies' own reads, so a consensus check).", "m"))
-    svg("hifi.svg", y + 16, b, "HiFi read support for dropped insertions",
+    svg("hifi.svg", y + 16, b, "HiFi read support for dropped bases",
         "Most carriers have HiFi read support for the dropped insertion; most controls do not.")
+
+
+# --- 6. what the restored bases reveal ---------------------------------------------------------
+
+def fig_net_change(rows):
+    fc = [r for r in rows if r["frame_changing"] == "True"]
+    ev = {c: {(r["assembly"], r["seqid"], r["gaps"]) for r in fc if net_class(r) == c} for c in NET_CLASSES}
+    genes = {c: len({r["gene_name"] for r in fc if net_class(r) == c}) for c in NET_CLASSES}
+    hidden = {c: sum(net_class(r) == c and r["cat_orf"] == "intact" and r["repaired_orf"] != "intact" for r in fc)
+              for c in NET_CLASSES}
+    tx = Counter(net_class(r) for r in fc)
+    total = sum(len(v) for v in ev.values())
+    x0, span = 280, 230
+    b = [text(24, 30, "The dropped bases hide frameshift insertions and frameshift deletions", "t"),
+         text(24, 50, "Frame-changing CDS gap events by net CDS change of the repaired copy vs GRCh38", "sub")]
+    y = 92
+    for c, cls, note in zip(NET_CLASSES, ("s1", "s2", "na"),
+                            ("CAT drops the inserted bases", "CAT drops bases beside a deletion",
+                             "net change is a multiple of 3")):
+        k = len(ev[c])
+        w = span * k / max(len(v) for v in ev.values())
+        b += [text(24, y + 1, c, ""), text(24, y + 16, note, "m"), rect(x0, y - 11, w, 22, cls),
+              text(x0 + w + 8, y + 1, f"{k:,} events ({100 * k / total:.0f}%)", ""),
+              text(x0 + w + 8, y + 16, f"{genes[c]:,} genes", "m")]
+        y += 46
+    b += [text(24, y - 6, "Events = distinct haplotype × locus.", "m"),
+          text(24, y + 10, f"CAT transcripts whose CDS reads intact but whose repaired CDS does not: "
+                           f"{hidden[NET_CLASSES[0]]:,} insertions, {hidden[NET_CLASSES[1]]:,} deletions.", "m")]
+    svg("net_change.svg", y + 26, b, "Frameshift insertions and deletions hidden by CAT",
+        f"Of {total} frame-changing CDS gap events, {len(ev[NET_CLASSES[0]])} hide a frameshift insertion, "
+        f"{len(ev[NET_CLASSES[1]])} a frameshift deletion and {len(ev[NET_CLASSES[2]])} have an in-frame net change.")
 
 
 if __name__ == "__main__":
@@ -254,4 +288,5 @@ if __name__ == "__main__":
     fig_per_haplotype(rows)
     fig_gap_lengths(rows)
     fig_hifi()
+    fig_net_change(rows)
     print("wrote", ", ".join(sorted(p.name for p in OUT.glob("*.svg"))))

@@ -1,7 +1,7 @@
 [project]
-name = "hprc-fs-ins"
+name = "hprc-fs-indel"
 version = "0.1.0"
-description = "Find and repair frame-changing insertions dropped from HPRC Release 2 CAT CDS annotations"
+description = "Find and repair frameshifts hidden by bases dropped from HPRC Release 2 CAT CDS annotations"
 requires-python = ">=3.12"
 dependencies = [
     "pysam>=0.24.1",

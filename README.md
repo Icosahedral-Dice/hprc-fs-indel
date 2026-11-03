@@ -1,8 +1,9 @@
-# hprc-fs-ins
+# hprc-fs-indel
 
-**HPRC Release 2 CAT gene annotations leave frame-changing insertions out of
-the CDS.** As a result, the annotated CDS looks intact when the assembly
-actually carries a frameshift.
+**HPRC Release 2 CAT gene annotations leave assembly bases out of the CDS,
+which hides frameshift insertions and frameshift deletions.** As a result,
+the annotated CDS looks intact when the assembly actually carries a
+frameshift.
 
 This repository shows the problem on public HPRC R2 data, and provides a
 Python tool (`cat_gaps.py`) that finds the affected transcripts, puts the
@@ -10,34 +11,55 @@ missing bases back, and re-checks the ORF.
 
 ## The problem
 
-When an assembly carries an insertion that shifts the frame, CAT keeps the
-GRCh38 frame. It does this by splitting the CDS into two blocks around a
-short (1–29 bp) gap that holds the inserted bases. The annotated CDS skips
-those bases, so it stays in frame, often has exactly the reference length,
-and usually keeps `proper_orf=True`.
+CAT keeps the GRCh38 reading frame by splitting the CDS into two blocks
+around a short (1–29 bp) gap. The annotated CDS skips the assembly bases in
+that gap, so it stays in frame and usually keeps `proper_orf=True`. Two
+kinds of frameshift get hidden this way:
+
+- **Frameshift insertions:** the gap holds the inserted bases.
+- **Frameshift deletions:** the gap holds bases next to a deletion. Without
+  them, the net change becomes a multiple of 3 and the frame is kept.
 
 ![How CAT drops an insertion: SPRY2 in HG02583](figures/mechanism.svg)
 
-CAT's own flags do not catch it. Of 90,379 affected CAT transcripts, 46%
-pass both `proper_orf` and `frameshift`, and 69% read as intact ORFs until
-the dropped bases are restored:
+The deletion case looks like this. In MICA (`ENST00000449934`, 83
+haplotypes), the assembly CDS is 1 bp shorter than GRCh38. CAT leaves out 2
+bases (`CT`), which turns the change into an in-frame 3-bp deletion:
 
-![CAT flags on transcripts with a dropped insertion](figures/flags.svg)
+| MICA CDS | length | reads as |
+| --- | ---: | --- |
+| GRCh38 | 999 bp | intact ORF |
+| CAT CDS (`CT` left out) | 996 bp | intact ORF (in-frame −3) |
+| assembly, `CT` restored | 998 bp | frameshift (−1) |
 
-It is systematic. Every one of the 462 R2 haplotypes is affected, with
-about 119 dropped frame-changing insertions each, across 1,795 genes:
+Restoring the dropped bases mostly reveals frameshift insertions. There are
+also 2,443 frameshift-deletion events in 233 genes. These are frameshifts
+that a plain deletion scan of the CAT CDS would miss:
 
-![Dropped insertions per haplotype](figures/per_haplotype.svg)
+![Frameshift insertions and deletions hidden by CAT](figures/net_change.svg)
 
-The dropped bases are real assembly sequence. At random events, HiFi reads
-carry the insertion in 37 of 40 carriers and in 1 of 40 controls:
+CAT's own flags do not catch either kind. Of 90,379 CAT transcripts with a
+frame-changing gap, 46% pass both `proper_orf` and `frameshift`, and 69%
+read as intact ORFs until the dropped bases are restored:
+
+![CAT flags on transcripts with a frame-changing CDS gap](figures/flags.svg)
+
+The problem is systematic. Every one of the 462 R2 haplotypes is affected,
+with about 119 frame-changing CDS gaps each, across 1,795 genes:
+
+![Frame-changing CDS gaps per haplotype](figures/per_haplotype.svg)
+
+The dropped bases are real assembly sequence. At random frameshift-insertion
+events, HiFi reads carry the insertion in 37 of 40 carriers and in 1 of 40
+controls:
 
 ![HiFi read support](figures/hifi.svg)
 
 **Consequence:** anyone who calls loss of function, pseudogenes or ORF
-integrity from the CAT CDS, or trusts `proper_orf` / `frameshift`, will
-undercount frameshift insertions. Frameshift deletions need no gap and are
-mostly unaffected.
+integrity from the CAT CDS, or trusts `proper_orf` / `frameshift`, will miss
+frameshift insertions and some frameshift deletions. Frameshift deletions
+are hidden only when CAT also drops bases next to them; a deletion without a
+gap is annotated correctly.
 
 ## Fix
 
@@ -103,17 +125,28 @@ Files in `results/`:
 | genes | 1,795 |
 | CAT transcripts with a gap matching a GRCh38 CDS intron (left alone) | 18,491 |
 
+Net CDS change of the repaired copy vs GRCh38, over the 90,379 frame-changing
+transcripts:
+
+| | transcripts | events | genes | CAT CDS reads intact, repaired does not |
+| --- | ---: | ---: | ---: | ---: |
+| frameshift insertion | 80,250 (89%) | 49,222 | 1,610 | 60,701 |
+| frameshift deletion | 4,151 (5%) | 2,443 | 233 | 1,365 |
+| in-frame net change | 5,978 (7%) | 4,058 | 225 | 7 |
+
+The hidden deletions mostly sit beside 1-, 2- or 4-bp gaps (2,145 of 2,443
+events). Net changes compare whole CDS lengths, so a copy with other indels
+elsewhere may be classed differently.
+
 ![Dropped CDS gap lengths](figures/gap_lengths.svg)
 
-The same mechanism shows up in two less common forms. `scan` handles both,
-because it simply restores the bases and re-reads the ORF:
-- **Next to a deletion.** CAT drops 1–4 bases beside a frameshift deletion,
-  so the net change is a multiple of 3.
-- **Restoring the frame.** Where the GRCh38 model is frame-disrupted relative
-  to most haplotypes, the dropped insertion restores the frame. In GPATCH4
-  (`ENST00000368232`), 458 of 462 haplotypes have a premature stop in the
-  CAT CDS but an intact ORF once `GT` is restored. Overall, 8% of affected
-  transcripts fall in this group.
+The dropped bases can also **restore the frame**. Where the GRCh38 model is
+frame-disrupted relative to most haplotypes, the CAT CDS looks broken
+although the assembly encodes an intact ORF. In GPATCH4 (`ENST00000368232`),
+458 of 462 haplotypes have a premature stop in the CAT CDS but an intact ORF
+once `GT` is restored. Overall, 8% of affected transcripts fall in this
+group. `scan` handles all of these cases the same way, because it simply
+restores the bases and re-reads the ORF.
 
 **HiFi spot-check method** (`uv run report.py out --hifi 40`). It picks
 random frame-changing events, one per gene, where the CAT CDS has the
@@ -154,7 +187,7 @@ net length within ±10 bp; "absent" means at most 5%.
 | file | |
 | --- | --- |
 | `cat_gaps.py` | `download` (CAT GFF3, optional assembly FASTA, GRCh38 GTF), `scan`, `hifi` |
-| `report.py` | aggregate per-haplotype scans into `results/`; `--hifi N` spot-check |
+| `report.py` | aggregate per-haplotype scans into `results/`; `--hifi N` spot-check; `uv run report.py results/r2_cat_cds_gaps.tsv.gz` rebuilds `summary.md` |
 | `figures.py` | redraw `figures/*.svg` from `results/` (`uv run figures.py`) |
 | `test_cat_gaps.py` | synthetic checks (`uv run python test_cat_gaps.py`) |
 

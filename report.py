@@ -1,6 +1,7 @@
 """Aggregate per-haplotype `cat_gaps.py scan` outputs and HiFi-check a random sample of events.
 
     uv run report.py OUT_DIR [--hifi N]
+    uv run report.py results/r2_cat_cds_gaps.tsv.gz      # re-summarize the published table
 
 OUT_DIR holds one `{assembly_name}.tsv` per haplotype (scanned with --fasta and --gtf). Writes
 results/r2_cat_cds_gaps.tsv.gz, results/summary.md and, with --hifi, results/hifi_spotcheck.tsv.
@@ -19,7 +20,19 @@ from cat_gaps import COLUMNS, hifi_support
 SUPPORTED, ABSENT, MIN_READS = 0.20, 0.05, 5  # share of spanning reads carrying the indel
 
 
+NET_CLASSES = ("frameshift insertion", "frameshift deletion", "in-frame net change")
+
+
+def net_class(r: dict) -> str:
+    """What the restored bases reveal: net CDS length change of the repaired copy vs GRCh38."""
+    net = int(r["repaired_cds_len"]) - int(r["ref_cds_len"])
+    return NET_CLASSES[2] if net % 3 == 0 else NET_CLASSES[0] if net > 0 else NET_CLASSES[1]
+
+
 def load(out_dir: Path) -> list[dict]:
+    if out_dir.is_file():  # the combined table written by a previous run
+        with gzip.open(out_dir, "rt", newline="") as fh:
+            return list(csv.DictReader(fh, delimiter="\t"))
     rows = []
     for tsv in sorted(out_dir.glob("*.tsv")):
         with open(tsv, newline="") as fh:
@@ -32,7 +45,8 @@ def pct(n: int, d: int) -> str:
     return f"{n:,} / {d:,} ({100 * n / d:.0f}%)" if d else "0"
 
 
-def summarize(rows: list[dict], n_hap: int) -> str:
+def summarize(rows: list[dict]) -> str:
+    n_hap = len({r["assembly"] for r in rows})
     gap = [r for r in rows if r["gaps"]]
     fc = [r for r in gap if r["frame_changing"] == "True"]
     events = {(r["assembly"], r["seqid"], r["gaps"]) for r in fc}
@@ -68,6 +82,15 @@ def summarize(rows: list[dict], n_hap: int) -> str:
         f"| missed by both flags (`proper_orf=True`, `frameshift` not True) | {pct(missed, len(fc))} |",
         f"| CAT CDS is an intact ORF, repaired CDS is not | {pct(hidden, len(fc))} |",
         f"| CAT CDS is broken, repaired CDS is an intact ORF | {pct(restored, len(fc))} |",
+        "",
+        "| Net CDS change of the repaired copy vs GRCh38 | transcripts | events | genes | "
+        "CAT CDS intact, repaired broken |",
+        "| --- | ---: | ---: | ---: | ---: |",
+        *(f"| {c} | {pct(sum(net_class(r) == c for r in fc), len(fc))} | "
+          f"{len({(r['assembly'], r['seqid'], r['gaps']) for r in fc if net_class(r) == c}):,} | "
+          f"{len({r['gene_name'] for r in fc if net_class(r) == c}):,} | "
+          f"{sum(net_class(r) == c and r['cat_orf'] == 'intact' and r['repaired_orf'] != 'intact' for r in fc):,} |"
+          for c in NET_CLASSES),
         "",
         "Gap length (bp): " + ", ".join(f"{k}: {v:,}" for k, v in sorted(lengths.items())),
         "",
@@ -125,22 +148,32 @@ def main() -> None:
     args = p.parse_args()
     rows = load(args.out_dir)
     args.results.mkdir(exist_ok=True)
-    with gzip.open(args.results / "r2_cat_cds_gaps.tsv.gz", "wt", newline="") as fh:
-        w = csv.DictWriter(fh, ["assembly", "sample", *COLUMNS], delimiter="\t", extrasaction="ignore", lineterminator="\n")
-        w.writeheader()
-        w.writerows(rows)
-    text = summarize(rows, len(list(args.out_dir.glob("*.tsv"))))
+    if args.out_dir.is_dir():
+        write_table(rows, args.results)
+    text = summarize(rows)
+    spot = args.results / "hifi_spotcheck.tsv"
     if args.hifi:
         checks = spotcheck(rows, args.hifi)
-        with open(args.results / "hifi_spotcheck.tsv", "w", newline="") as fh:
-            w = csv.DictWriter(fh, ["role", "sample", "gene", "source_transcript", "alignment_mode", "grch38_pos", "net", "gap_bases",
-                                    "spanning", "carrying", "share", "status"], delimiter="\t", restval="", lineterminator="\n")
+        with open(spot, "w", newline="") as fh:
+            w = csv.DictWriter(fh, ["role", "sample", "gene", "source_transcript", "alignment_mode", "grch38_pos", "net",
+                                    "gap_bases", "spanning", "carrying", "share", "status"],
+                               delimiter="\t", restval="", lineterminator="\n")
             w.writeheader()
             w.writerows(checks)
-        tally = Counter((c["role"], c["status"]) for c in checks)
+    if spot.exists() and (args.hifi or args.out_dir.is_file()):
+        with open(spot, newline="") as fh:
+            tally = Counter((c["role"], c["status"]) for c in csv.DictReader(fh, delimiter="\t"))
         text += "\nHiFi spot-check (" + "; ".join(f"{role} {status}: {k}" for (role, status), k in sorted(tally.items())) + ")\n"
     (args.results / "summary.md").write_text(text)
     print(text)
+
+
+def write_table(rows: list[dict], results: Path) -> None:
+    with gzip.open(results / "r2_cat_cds_gaps.tsv.gz", "wt", newline="") as fh:
+        w = csv.DictWriter(fh, ["assembly", "sample", *COLUMNS], delimiter="\t", extrasaction="ignore",
+                           lineterminator="\n")
+        w.writeheader()
+        w.writerows(rows)
 
 
 if __name__ == "__main__":

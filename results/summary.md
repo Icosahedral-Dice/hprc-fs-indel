@@ -18,6 +18,12 @@ Haplotypes scanned: 462
 | CAT CDS is an intact ORF, repaired CDS is not | 62,073 / 90,379 (69%) |
 | CAT CDS is broken, repaired CDS is an intact ORF | 7,517 / 90,379 (8%) |
 
+| Net CDS change of the repaired copy vs GRCh38 | transcripts | events | genes | CAT CDS intact, repaired broken |
+| --- | ---: | ---: | ---: | ---: |
+| frameshift insertion | 80,250 / 90,379 (89%) | 49,222 | 1,610 | 60,701 |
+| frameshift deletion | 4,151 / 90,379 (5%) | 2,443 | 233 | 1,365 |
+| in-frame net change | 5,978 / 90,379 (7%) | 4,058 | 225 | 7 |
+
 Gap length (bp): 1: 54,271, 2: 17,100, 3: 702, 4: 6,160, 5: 4,140, 6: 40, 7: 1,316, 8: 797, 9: 274, 10: 2,214, 11: 931, 12: 33, 13: 1,197, 14: 271, 15: 21, 16: 1,334, 17: 91, 18: 10, 19: 440, 20: 563, 21: 292, 22: 1,461, 23: 367, 24: 11, 25: 4,901, 26: 140, 27: 3, 28: 122, 29: 1,094
 
 Short CDS gaps that match a GRCh38 CDS intron (kept as-is): 18,491 transcripts in 15 genes, e.g. OAZ1, OAZ3, SHANK3, SLC37A4, OAZ2, TCEAL6, ABO, PEG10

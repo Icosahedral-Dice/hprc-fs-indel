@@ -1,9 +1,9 @@
-"""Find and repair frame-changing insertions that HPRC Release 2 CAT annotations leave out of the CDS.
+"""Find and repair frameshifts hidden by assembly bases that HPRC Release 2 CAT annotations leave out of the CDS.
 
-CAT projects a GRCh38 transcript onto a haplotype assembly. When the assembly carries an insertion
-that shifts the frame, CAT keeps the reference frame by splitting the CDS into two blocks around a
-short (1-29 bp) gap that holds the inserted bases. The annotated CDS then omits those bases, looks
-intact, and often keeps proper_orf=True / frameshift=False.
+CAT projects a GRCh38 transcript onto a haplotype assembly and keeps the reference frame by splitting
+the CDS into two blocks around a short (1-29 bp) gap. The gap holds the bases of a frameshift
+insertion, or bases next to a frameshift deletion that make the net change a multiple of 3. The
+annotated CDS omits those bases, looks intact, and often keeps proper_orf=True / frameshift=False.
 
 Subcommands:
   download  fetch CAT GFF3 (and optionally the assembly FASTA) for HPRC R2 samples, plus the GRCh38 GTF
