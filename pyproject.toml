@@ -1,0 +1,8 @@
+[project]
+name = "hprc-fs-ins"
+version = "0.1.0"
+description = "Find and repair frame-changing insertions dropped from HPRC Release 2 CAT CDS annotations"
+requires-python = ">=3.12"
+dependencies = [
+    "pysam>=0.24.1",
+]
